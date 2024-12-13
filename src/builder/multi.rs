@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::{barrier::Barrier, consumer::{MultiConsumerBarrier, SingleConsumerBarrier}, producer::multi::{MultiProducer, MultiProducerBarrier}, wait_strategies::WaitStrategy, builder::ProcessorSettings, Sequence};
+use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{MultiConsumerBarrier, SingleConsumerBarrier}, producer::multi::{MultiProducer, MultiProducerBarrier}, receiver::Receiver, wait_strategies::WaitStrategy, Sequence};
 
 use super::{Builder, Shared};
 
@@ -101,6 +101,13 @@ where
 	{
 		self.add_event_handler(event_handler);
 		MPSCBuilder { parent: self }
+	}
+
+    // todo: better interface
+    /// Add an event handler with receiver.
+	pub fn handle_events_with_receiver(mut self) -> (MPSCBuilder<E, W, B>, Receiver<E, B>) {
+		let receiver = self.add_event_receiver();
+		(MPSCBuilder { parent: self }, receiver)
 	}
 
 	/// Add an event handler with state.

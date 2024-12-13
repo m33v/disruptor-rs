@@ -38,6 +38,7 @@ pub fn mpsc_benchmark(c: &mut Criterion) {
 
 			crossbeam(&mut group, params, &param_description);
 			disruptor(&mut group, params, &param_description);
+			disruptor_with_receiver(&mut group, params, &param_description);
 		}
 	}
 	group.finish();
@@ -222,6 +223,56 @@ fn disruptor(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_des
 	run_benchmark(group, benchmark_id, burst_size, sink, params, &burst_producers);
 
 	burst_producers.iter_mut().for_each(BurstProducer::stop);
+}
+
+fn disruptor_with_receiver(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_description: &str) {
+	let factory   = || { Event { data: 0 } };
+	// Use an AtomicI64 to count number of received events.
+	let sink      = Arc::new(AtomicI64::new(0));
+
+	let producer = disruptor::build_multi_producer(DATA_STRUCTURE_SIZE, factory, BusySpin);
+    let (producer, mut r) = producer.handle_events_with_receiver();
+    let producer = producer.build();
+
+    let receiver = {
+		let sink = Arc::clone(&sink);
+		thread::spawn(move || {
+			loop {
+				match r.try_recv() {
+					Ok(event)         => {
+						black_box(event.data);
+						sink.fetch_add(1, Release);
+					},
+					Err(disruptor::TryRecvError::Empty) => continue,
+					Err(disruptor::TryRecvError::Disconnected) => break,
+				}
+			}
+		})
+	};
+    
+	let benchmark_id        = BenchmarkId::new("disruptor_with_receiver", &param_description);
+	let burst_size          = Arc::new(AtomicI64::new(0));
+	let mut burst_producers = (0..PRODUCERS)
+		.into_iter()
+		.map(|_| {
+			let burst_size   = Arc::clone(&burst_size);
+			let mut producer = producer.clone();
+			BurstProducer::new(move || {
+				let burst_size = burst_size.load(Acquire);
+				producer.batch_publish(burst_size as usize, |iter| {
+					for (i, e) in iter.enumerate() {
+						e.data = black_box(i as i64);
+					}
+				});
+			})
+		})
+		.collect::<Vec<BurstProducer>>();
+	drop(producer); // Original producer not used.
+
+	run_benchmark(group, benchmark_id, burst_size, sink, params, &burst_producers);
+
+	burst_producers.iter_mut().for_each(BurstProducer::stop);
+	receiver.join().expect("Should not have panicked.");
 }
 
 criterion_group!(mpsc, mpsc_benchmark);

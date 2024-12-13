@@ -5,7 +5,7 @@
 use std::sync::{atomic::AtomicI64, Arc};
 use core_affinity::CoreId;
 use crossbeam_utils::CachePadded;
-use crate::{affinity::cpu_has_core_else_panic, barrier::{Barrier, NONE}, consumer::{start_processor, start_processor_with_state}, Sequence};
+use crate::{affinity::cpu_has_core_else_panic, barrier::{Barrier, NONE}, consumer::{make_receiver, start_processor, start_processor_with_state}, receiver::Receiver, Sequence};
 use crate::consumer::Consumer;
 use crate::cursor::Cursor;
 use crate::producer::{single::SingleProducerBarrier, multi::MultiProducerBarrier};
@@ -156,6 +156,13 @@ where
 		let barrier            = self.dependent_barrier();
 		let (cursor, consumer) = start_processor(event_handler, self.shared(), barrier);
 		self.shared().add_consumer(consumer, cursor);
+	}
+
+    fn add_event_receiver(&mut self) -> Receiver<E, B> {
+		let barrier = self.dependent_barrier();
+		let (cursor, consumer, receiver) = make_receiver(self.shared(), barrier);
+		self.shared().add_consumer(consumer, cursor);
+        receiver
 	}
 
 	fn add_event_handler_with_state<EH, S, IS>(&mut self, event_handler: EH, initialize_state: IS)

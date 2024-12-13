@@ -1,7 +1,7 @@
 use std::{sync::{atomic::{fence, AtomicI64, Ordering}, Arc}, thread::{self, JoinHandle}};
 use crossbeam_utils::CachePadded;
 
-use crate::{affinity::set_affinity_if_defined, barrier::Barrier, builder::Shared, cursor::Cursor, wait_strategies::WaitStrategy, Sequence};
+use crate::{affinity::set_affinity_if_defined, barrier::Barrier, builder::Shared, cursor::Cursor, receiver::Receiver, wait_strategies::WaitStrategy, Sequence};
 
 #[doc(hidden)]
 pub struct Consumer {
@@ -12,6 +12,12 @@ impl Consumer {
 	pub(crate) fn new(join_handle: JoinHandle<()>) -> Self {
 		Self {
 			join_handle: Some(join_handle),
+		}
+	}
+
+    pub(crate) fn new_empty() -> Self {
+		Self {
+			join_handle: None,
 		}
 	}
 
@@ -105,6 +111,30 @@ where
 
 	let consumer = Consumer::new(join_handle);
 	(consumer_cursor, consumer)
+}
+
+pub(crate) fn make_receiver<E, W, B> (
+	builder:           &mut Shared<E, W>,
+	barrier:           Arc<B>)
+-> (Arc<Cursor>, Consumer, Receiver<E, B>)
+where
+	E:  'static + Send + Sync,
+	W:  'static + WaitStrategy,
+	B:  'static + Barrier + Send + Sync,
+{
+	let consumer_cursor      = Arc::new(Cursor::new(-1));// Initially, the consumer has not read slot 0 yet.
+	let ring_buffer          = Arc::clone(&builder.ring_buffer);
+	let shutdown_at_sequence = Arc::clone(&builder.shutdown_at_sequence);
+
+	let consumer = Consumer::new_empty();
+    let receiver = Receiver::new(
+        ring_buffer,
+        shutdown_at_sequence,
+        consumer_cursor.clone(),
+        barrier
+    );
+
+	(consumer_cursor, consumer, receiver)
 }
 
 pub(crate) fn start_processor_with_state<E, EP, W, B, S, IS> (

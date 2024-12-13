@@ -224,12 +224,14 @@ mod consumer;
 mod cursor;
 mod ringbuffer;
 mod producer;
+mod receiver;
 
 pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
 pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 pub use crate::producer::{single::SingleProducer, multi::MultiProducer};
 pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
+pub use crate::receiver::TryRecvError;
 
 #[cfg(test)]
 mod tests {
@@ -581,6 +583,51 @@ mod tests {
 				for i in (num_items/2)..num_items {
 					producer2.publish(|e| e.num = i);
 				}
+			});
+		});
+
+		let mut result: Vec<_> = r.iter().collect();
+		result.sort();
+
+		let expected: Vec<i64> = (0..num_items).collect();
+		assert_eq!(result, expected);
+	}
+
+	#[test]
+	fn multi_publisher_disruptor_with_receiver() {
+		let (test_sender, r)    = mpsc::channel();
+
+		let producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint);
+        let (producer1, mut receiver) = producer1.handle_events_with_receiver();
+        let mut producer1 = producer1.build();
+
+		let mut producer2 = producer1.clone();
+
+		let num_items = 100;
+
+		thread::scope(|s| {
+			s.spawn(move || {
+				for i in 0..num_items/2 {
+					producer1.publish(|e| e.num = i);
+				}
+			});
+
+			s.spawn(move || {
+				for i in (num_items/2)..num_items {
+					producer2.publish(|e| e.num = i);
+				}
+			});
+
+            s.spawn(move || {
+                loop {
+                    match receiver.try_recv() {
+                        Err(TryRecvError::Disconnected) => break,
+                        Err(TryRecvError::Empty) => continue,
+                        Ok(e) => {
+                            test_sender.send(e.num).expect("Should be able to send.");
+                        }
+                    }
+                }
 			});
 		});
 
