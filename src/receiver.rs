@@ -1,4 +1,7 @@
-use std::sync::{atomic::{fence, AtomicI64, Ordering}, Arc};
+use std::sync::{
+    atomic::{fence, AtomicI64, Ordering},
+    Arc,
+};
 
 use crossbeam_utils::CachePadded;
 
@@ -25,8 +28,8 @@ pub struct Receiver<E, B> {
 
 impl<E, B> Receiver<E, B>
 where
-	E: 'static + Send + Sync,
-	B: 'static + Barrier + Send + Sync,
+    E: 'static + Send + Sync,
+    B: 'static + Barrier + Send + Sync,
 {
     pub(crate) fn new(
         ring_buffer: Arc<RingBuffer<E>>,
@@ -72,7 +75,7 @@ where
 
         let end_of_batch = available == self.sequence;
         let event = self.get_next();
-        
+
         if !end_of_batch {
             self.available = Some(available);
         }
@@ -83,7 +86,7 @@ where
     fn get_next<'a>(&mut self) -> &'a E {
         // SAFETY: Now, we have (shared) read access to the event at `sequence`.
         let event_ptr = self.ring_buffer.get(self.sequence);
-        let event = unsafe { & *event_ptr };
+        let event = unsafe { &*event_ptr };
         // Signal to producers or later consumers that we're done processing `sequence`.
         self.consumer_cursor.store(self.sequence);
         // Update next sequence to read.
