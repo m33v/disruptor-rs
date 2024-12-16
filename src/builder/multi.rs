@@ -117,7 +117,6 @@ where
         MPSCBuilder { parent: self }
     }
 
-    // todo: better interface
     /// Add an event handler with receiver.
     pub fn handle_events_with_receiver(mut self) -> (MPSCBuilder<E, W, B>, Receiver<E, B>) {
         let receiver = self.add_event_receiver();
@@ -154,6 +153,12 @@ where
         MPMCBuilder {
             parent: self.parent,
         }
+    }
+
+    /// Add an event handler with receiver.
+    pub fn handle_events_with_receiver(mut self) -> (MPMCBuilder<E, W, B>, Receiver<E, B>) {
+        let receiver = self.add_event_receiver();
+        (MPMCBuilder { parent: self.parent }, receiver)
     }
 
     /// Add an event handler with state.
@@ -214,6 +219,12 @@ where
     {
         self.add_event_handler(event_handler);
         self
+    }
+
+    /// Add an event handler with receiver.
+    pub fn handle_events_with_receiver(mut self) -> (MPMCBuilder<E, W, B>, Receiver<E, B>) {
+        let receiver = self.add_event_receiver();
+        (self, receiver)
     }
 
     /// Add an event handler with state.

@@ -47,8 +47,6 @@ where
         }
     }
 
-    // todo: recv_blocking
-
     pub fn try_recv(&mut self) -> Result<&E, TryRecvError> {
         if let Some(available) = self.available {
             let end_of_batch = available == self.sequence;

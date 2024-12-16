@@ -677,6 +677,76 @@ mod tests {
     }
 
     #[test]
+    fn multi_publisher_disruptor_with_three_receivers() {
+        let (test_sender_1, r1) = mpsc::channel();
+        let (test_sender_2, r2) = mpsc::channel();
+        let (test_sender_3, r3) = mpsc::channel();
+
+        let producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint);
+
+        let (producer1, mut receiver1) = producer1.handle_events_with_receiver();
+        let (producer1, mut receiver2) = producer1.handle_events_with_receiver();
+        let (producer1, mut receiver3) = producer1.handle_events_with_receiver();
+
+        let mut producer1 = producer1.build();
+        let mut producer2 = producer1.clone();
+
+        let num_items = 100;
+
+        thread::scope(|s| {
+            s.spawn(move || {
+                for i in 0..num_items / 2 {
+                    producer1.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || {
+                for i in (num_items / 2)..num_items {
+                    producer2.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || loop {
+                match receiver1.try_recv() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(e) => {
+                        test_sender_1.send(e.num).expect("Should be able to send.");
+                    }
+                }
+            });
+
+            s.spawn(move || loop {
+                match receiver2.try_recv() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(e) => {
+                        test_sender_2.send(e.num).expect("Should be able to send.");
+                    }
+                }
+            });
+
+            s.spawn(move || loop {
+                match receiver3.try_recv() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(e) => {
+                        test_sender_3.send(e.num).expect("Should be able to send.");
+                    }
+                }
+            });
+        });
+
+        for r in [r1, r2, r3] {
+            let mut result: Vec<_> = r.iter().collect();
+            result.sort();
+    
+            let expected: Vec<i64> = (0..num_items).collect();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
     fn multi_publisher_disruptor_with_batch_publication() {
         let (s, r) = mpsc::channel();
         let processor = move |e: &Event, _, _| {
