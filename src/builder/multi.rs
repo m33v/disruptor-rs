@@ -158,7 +158,12 @@ where
     /// Add an event handler with receiver.
     pub fn handle_events_with_receiver(mut self) -> (MPMCBuilder<E, W, B>, Receiver<E, B>) {
         let receiver = self.add_event_receiver();
-        (MPMCBuilder { parent: self.parent }, receiver)
+        (
+            MPMCBuilder {
+                parent: self.parent,
+            },
+            receiver,
+        )
     }
 
     /// Add an event handler with state.

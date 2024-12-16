@@ -740,7 +740,7 @@ mod tests {
         for r in [r1, r2, r3] {
             let mut result: Vec<_> = r.iter().collect();
             result.sort();
-    
+
             let expected: Vec<i64> = (0..num_items).collect();
             assert_eq!(result, expected);
         }
