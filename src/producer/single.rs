@@ -49,6 +49,13 @@ where
     }
 
     #[inline]
+    fn send(&mut self, value: E) {
+        self.publish(|e| {
+            *e = value;
+        });
+    }
+
+    #[inline]
     fn try_batch_publish<'a, F>(
         &'a mut self,
         n: usize,

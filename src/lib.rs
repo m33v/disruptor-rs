@@ -747,6 +747,95 @@ mod tests {
     }
 
     #[test]
+    fn multi_publisher_disruptor_receiver_drain() {
+        let (test_sender, r) = mpsc::channel();
+
+        let producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint);
+        let (producer1, mut receiver) = producer1.handle_events_with_receiver();
+        let mut producer1 = producer1.build();
+
+        let mut producer2 = producer1.clone();
+
+        let num_items = 100;
+
+        thread::scope(|s| {
+            s.spawn(move || {
+                for i in 0..num_items / 2 {
+                    producer1.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || {
+                for i in (num_items / 2)..num_items {
+                    producer2.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || {
+                let mut cnt = 0;
+                while cnt < num_items {
+                    for e in receiver.drain() {
+                        test_sender.send(e.num).expect("Should be able to send.");
+                        cnt += 1;
+                    }
+                }
+            });
+        });
+
+        let mut result: Vec<_> = r.iter().collect();
+        result.sort();
+
+        let expected: Vec<i64> = (0..num_items).collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn drain_should_take_all_events_at_moment_of_call() {
+        let b = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint);
+        let (b, mut rx) = b.handle_events_with_receiver();
+        let mut tx = b.build();
+
+        tx.send(Event { num: 1 });
+        tx.send(Event { num: 2 });
+        tx.send(Event { num: 3 });
+
+        let mut iter = rx.drain();
+        assert_eq!(iter.next().map(|e| e.num), Some(1));
+        assert_eq!(iter.next().map(|e| e.num), Some(2));
+        
+        tx.send(Event { num: 4 });
+        drop(iter);
+
+        assert_eq!(rx.drain().next().map(|e| e.num), Some(4));
+    }
+
+    #[test]
+    fn early_drop_of_drain_should_fully_cleanup_queue() {
+        let queue_size = 64;
+        let b = build_multi_producer(queue_size, factory(), BusySpinWithSpinLoopHint);
+        let (b, mut rx) = b.handle_events_with_receiver();
+        let mut tx = b.build();
+
+        tx.send(Event { num: 1 });
+        tx.send(Event { num: 2 });
+        tx.send(Event { num: 3 });
+        let iter = rx.drain();
+        drop(iter);
+        
+        assert!(tx.try_batch_publish(queue_size, |_| {}).is_ok());
+    }
+
+    #[test]
+    fn drain_works_on_empty() {
+        let queue_size = 64;
+        let b = build_multi_producer(queue_size, factory(), BusySpinWithSpinLoopHint);
+        let (b, mut rx) = b.handle_events_with_receiver();
+        let _tx = b.build();
+
+        assert!(rx.drain().next().is_none());
+    }
+
+    #[test]
     fn multi_publisher_disruptor_with_batch_publication() {
         let (s, r) = mpsc::channel();
         let processor = move |e: &Event, _, _| {

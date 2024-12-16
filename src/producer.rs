@@ -198,6 +198,9 @@ pub trait Producer<E> {
     where
         F: FnOnce(&mut E);
 
+    /// Same as [`Self::publish`] but accepts owned event to send
+    fn send(&mut self, e: E);
+
     /// Publish a batch of Events into the Disruptor.
     ///
     /// Spins until there are enough available slots in the ring buffer.

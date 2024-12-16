@@ -1,7 +1,7 @@
-use std::sync::{
+use std::{marker::PhantomData, sync::{
     atomic::{fence, AtomicI64, Ordering},
     Arc,
-};
+}};
 
 use crossbeam_utils::CachePadded;
 
@@ -24,6 +24,58 @@ pub struct Receiver<E, B> {
     shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
     consumer_cursor: Arc<Cursor>,
     barrier: Arc<B>,
+}
+
+pub struct Drain<'a, E> {
+    sequence: i64,
+    available: i64,
+    ring_buffer: Arc<RingBuffer<E>>,
+    consumer_cursor: Arc<Cursor>,
+    _phantom: PhantomData<&'a E>,
+}
+
+impl<'a, E> Drain<'a, E> {
+    pub(crate) fn new_empty(
+        ring_buffer: Arc<RingBuffer<E>>,
+        consumer_cursor: Arc<Cursor>,
+    ) -> Self {
+        Self {
+            sequence: 0,
+            available: -1,
+            ring_buffer,
+            consumer_cursor,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, E> Iterator for Drain<'a, E> where E: 'a {
+    type Item = &'a E;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.available < self.sequence {
+            return None
+        }
+
+        // SAFETY: Now, we have (shared) read access to the event at `sequence`.
+        let event_ptr = self.ring_buffer.get(self.sequence);
+        let event = unsafe { &*event_ptr };
+        // Signal to producers or later consumers that we're done processing `sequence`.
+        self.consumer_cursor.store(self.sequence);
+        // Update next sequence to read.
+        self.sequence += 1;
+
+        Some(event)
+    }
+}
+
+impl<'a, E> Drop for Drain<'a, E> where E: 'a {
+    fn drop(&mut self) {
+        if self.sequence < self.available {
+            // Receiver::sequence was set to self.available already
+            self.consumer_cursor.store(self.available);
+        }
+    }
 }
 
 impl<E, B> Receiver<E, B>
@@ -79,6 +131,35 @@ where
         }
 
         Ok(event)
+    }
+
+    pub fn drain(&mut self) -> Drain<'_, E> {
+        let available = if let Some(available) = self.available.take() {
+            available
+        } else {
+            let available = self.barrier.get_after(self.sequence);
+            let closed = self.shutdown_at_sequence.load(Ordering::Relaxed) == self.sequence;
+            fence(Ordering::Acquire);
+
+            if closed || (available < self.sequence) {
+                return Drain::new_empty(self.ring_buffer.clone(), self.consumer_cursor.clone());
+            }
+
+            available
+        };
+
+        // warn! `Drain` should update `consumer_cursor` to `available` in case of early drop
+        let sequence = self.sequence;
+        self.sequence = available + 1; // ready to read next message after drain
+
+        Drain {
+            available,
+            sequence,
+            ring_buffer: self.ring_buffer.clone(),
+            // if we update `consumer_cursor` beforehand then `ring_buffer` could be overwritten in time of iterating
+            consumer_cursor: self.consumer_cursor.clone(),
+            _phantom: PhantomData,
+        }
     }
 
     fn get_next<'a>(&mut self) -> &'a E {
