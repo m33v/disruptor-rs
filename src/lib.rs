@@ -800,7 +800,7 @@ mod tests {
         let mut iter = rx.drain().unwrap();
         assert_eq!(iter.next().map(|e| e.num), Some(1));
         assert_eq!(iter.next().map(|e| e.num), Some(2));
-        
+
         tx.publish(|e| *e = Event { num: 4 });
         drop(iter);
 
@@ -819,7 +819,7 @@ mod tests {
         tx.publish(|e| *e = Event { num: 3 });
         let iter = rx.drain();
         drop(iter);
-        
+
         assert!(tx.try_batch_publish(queue_size, |_| {}).is_ok());
     }
 
@@ -832,7 +832,6 @@ mod tests {
 
         assert!(rx.drain().unwrap().next().is_none());
     }
-
 
     #[test]
     fn drain_returns_none_on_disconnect() {
@@ -1234,7 +1233,6 @@ mod tests {
             drop(s_error);
         });
 
-    
         let expected_sequence_reads = consumers * num_events * producers;
         let errors: Vec<_> = r_error.iter().collect();
         let mut seen_sequences: Vec<_> = r_seq.iter().collect();

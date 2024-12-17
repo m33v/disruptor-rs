@@ -1,11 +1,19 @@
-use std::{ops::Deref, sync::{
-    atomic::{fence, AtomicI64, Ordering},
-    Arc,
-}};
+use std::{
+    ops::Deref,
+    sync::{
+        atomic::{fence, AtomicI64, Ordering},
+        Arc,
+    },
+};
 
 use crossbeam_utils::CachePadded;
 
-use crate::{barrier::{Barrier, NONE}, cursor::Cursor, ringbuffer::RingBuffer, Sequence};
+use crate::{
+    barrier::{Barrier, NONE},
+    cursor::Cursor,
+    ringbuffer::RingBuffer,
+    Sequence,
+};
 
 /// An error returned from the [`try_recv`] method.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -47,12 +55,15 @@ impl<'a, E> Drain<'a, E> {
     }
 }
 
-impl<'a, E> Iterator for Drain<'a, E> where E: 'a {
+impl<'a, E> Iterator for Drain<'a, E>
+where
+    E: 'a,
+{
     type Item = &'a E;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.available < self.sequence {
-            return None
+            return None;
         }
 
         // SAFETY: Now, we have (shared) read access to the event at `sequence`.
@@ -65,7 +76,10 @@ impl<'a, E> Iterator for Drain<'a, E> where E: 'a {
     }
 }
 
-impl<'a, E> Drop for Drain<'a, E> where E: 'a {
+impl<'a, E> Drop for Drain<'a, E>
+where
+    E: 'a,
+{
     fn drop(&mut self) {
         // no changes required for empty iterator
         if self.available != NONE {
@@ -75,7 +89,7 @@ impl<'a, E> Drop for Drain<'a, E> where E: 'a {
     }
 }
 
-pub struct Guard<'a, E>{
+pub struct Guard<'a, E> {
     consumer_cursor: Arc<Cursor>,
     sequence: i64,
     event: &'a E,
@@ -167,9 +181,11 @@ where
         }
     }
 
-    /// returns `None` when channel is disconnected
-    /// 
-    /// all elements in iterator are considered unread until `Drain` is dropped
+    /// Returns `None` when channel is disconnected
+    ///
+    /// `Drain` iterator returns all unread and available elements at moment of call
+    ///
+    /// All elements of iterator are considered unread until `Drain` is dropped
     /// which can affect producers and dependent consumers
     pub fn drain(&mut self) -> Option<Drain<'_, E>> {
         let available = if let Some(available) = self.available.take() {
