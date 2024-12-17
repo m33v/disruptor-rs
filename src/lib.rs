@@ -230,7 +230,7 @@ pub use crate::builder::{build_multi_producer, build_single_producer, ProcessorS
 pub use crate::consumer::{MultiConsumerBarrier, SingleConsumerBarrier};
 pub use crate::producer::{multi::MultiProducer, single::SingleProducer};
 pub use crate::producer::{MissingFreeSlots, Producer, RingBufferFull};
-pub use crate::receiver::TryRecvError;
+pub use crate::receiver::{Receiver, TryRecvError};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 
 #[cfg(test)]
