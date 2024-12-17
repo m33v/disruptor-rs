@@ -793,15 +793,15 @@ mod tests {
         let (b, mut rx) = b.handle_events_with_receiver();
         let mut tx = b.build();
 
-        tx.send(Event { num: 1 });
-        tx.send(Event { num: 2 });
-        tx.send(Event { num: 3 });
+        tx.publish(|e| *e = Event { num: 1 });
+        tx.publish(|e| *e = Event { num: 2 });
+        tx.publish(|e| *e = Event { num: 3 });
 
         let mut iter = rx.drain().unwrap();
         assert_eq!(iter.next().map(|e| e.num), Some(1));
         assert_eq!(iter.next().map(|e| e.num), Some(2));
         
-        tx.send(Event { num: 4 });
+        tx.publish(|e| *e = Event { num: 4 });
         drop(iter);
 
         assert_eq!(rx.drain().unwrap().next().map(|e| e.num), Some(4));
@@ -814,9 +814,9 @@ mod tests {
         let (b, mut rx) = b.handle_events_with_receiver();
         let mut tx = b.build();
 
-        tx.send(Event { num: 1 });
-        tx.send(Event { num: 2 });
-        tx.send(Event { num: 3 });
+        tx.publish(|e| *e = Event { num: 1 });
+        tx.publish(|e| *e = Event { num: 2 });
+        tx.publish(|e| *e = Event { num: 3 });
         let iter = rx.drain();
         drop(iter);
         
