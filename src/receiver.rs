@@ -170,6 +170,9 @@ where
     }
 
     /// returns `None` when channel is disconnected
+    /// 
+    /// all elements in iterator are considered unread until `Drain` is dropped
+    /// which can affect producers and dependent consumers
     pub fn drain(&mut self) -> Option<Drain<'_, E>> {
         let available = if let Some(available) = self.available.take() {
             available
