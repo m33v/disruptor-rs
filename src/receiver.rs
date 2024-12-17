@@ -37,15 +37,12 @@ pub struct Receiver<E, B> {
 pub struct Drain<'a, E> {
     sequence: Sequence,
     available: Sequence,
-    ring_buffer: &'a Arc<RingBuffer<E>>,
-    consumer_cursor: &'a Arc<Cursor>,
+    ring_buffer: &'a RingBuffer<E>,
+    consumer_cursor: &'a Cursor,
 }
 
 impl<'a, E> Drain<'a, E> {
-    pub(crate) fn new_empty(
-        ring_buffer: &'a Arc<RingBuffer<E>>,
-        consumer_cursor: &'a Arc<Cursor>,
-    ) -> Self {
+    pub(crate) fn new_empty(ring_buffer: &'a RingBuffer<E>, consumer_cursor: &'a Cursor) -> Self {
         Self {
             sequence: 0,
             available: NONE,
