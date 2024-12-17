@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::Deref, sync::{
+use std::{ops::Deref, sync::{
     atomic::{fence, AtomicI64, Ordering},
     Arc,
 }};
@@ -29,22 +29,20 @@ pub struct Receiver<E, B> {
 pub struct Drain<'a, E> {
     sequence: Sequence,
     available: Sequence,
-    ring_buffer: Arc<RingBuffer<E>>,
-    consumer_cursor: Arc<Cursor>,
-    _phantom: PhantomData<&'a E>,
+    ring_buffer: &'a Arc<RingBuffer<E>>,
+    consumer_cursor: &'a Arc<Cursor>,
 }
 
 impl<'a, E> Drain<'a, E> {
     pub(crate) fn new_empty(
-        ring_buffer: Arc<RingBuffer<E>>,
-        consumer_cursor: Arc<Cursor>,
+        ring_buffer: &'a Arc<RingBuffer<E>>,
+        consumer_cursor: &'a Arc<Cursor>,
     ) -> Self {
         Self {
             sequence: 0,
             available: NONE,
             ring_buffer,
             consumer_cursor,
-            _phantom: PhantomData,
         }
     }
 }
@@ -186,7 +184,7 @@ where
             }
 
             if available < self.sequence {
-                return Some(Drain::new_empty(self.ring_buffer.clone(), self.consumer_cursor.clone()));
+                return Some(Drain::new_empty(&self.ring_buffer, &self.consumer_cursor));
             }
 
             available
@@ -199,10 +197,9 @@ where
         Some(Drain {
             available,
             sequence,
-            ring_buffer: self.ring_buffer.clone(),
+            ring_buffer: &self.ring_buffer,
             // if we update `consumer_cursor` beforehand then `ring_buffer` could be overwritten in time of iterating
-            consumer_cursor: self.consumer_cursor.clone(),
-            _phantom: PhantomData,
+            consumer_cursor: &self.consumer_cursor,
         })
     }
 }
