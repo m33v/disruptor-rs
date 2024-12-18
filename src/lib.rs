@@ -772,9 +772,15 @@ mod tests {
             });
 
             s.spawn(move || {
-                while let Some(iter) = receiver.drain() {
-                    for e in iter {
-                        test_sender.send(e.num).expect("Should be able to send.");
+                loop {
+                    match receiver.drain() {
+                        Err(TryRecvError::Disconnected) => break,
+                        Err(TryRecvError::Empty) => continue,
+                        Ok(iter) => {
+                            for e in iter {
+                                test_sender.send(e.num).expect("Should be able to send.");
+                            }
+                        }
                     }
                 }
             });
@@ -824,17 +830,17 @@ mod tests {
     }
 
     #[test]
-    fn drain_works_on_empty() {
+    fn drain_returns_correct_error_on_empty() {
         let queue_size = 64;
         let b = build_multi_producer(queue_size, factory(), BusySpinWithSpinLoopHint);
         let (b, mut rx) = b.handle_events_with_receiver();
         let _tx = b.build();
 
-        assert!(rx.drain().unwrap().next().is_none());
+        assert!(matches!(rx.drain(), Err(TryRecvError::Empty)));
     }
 
     #[test]
-    fn drain_returns_none_on_disconnect() {
+    fn drain_returns_correct_error_on_disconnect() {
         let queue_size = 64;
         let b = build_multi_producer(queue_size, factory(), BusySpinWithSpinLoopHint);
         let (b, mut rx) = b.handle_events_with_receiver();
@@ -842,7 +848,7 @@ mod tests {
 
         drop(tx);
 
-        assert!(rx.drain().is_none());
+        assert!(matches!(rx.drain(), Err(TryRecvError::Disconnected)));
     }
 
     #[test]
@@ -1303,19 +1309,25 @@ mod tests {
                     let s_seq = s_seq.clone();
                     std::thread::spawn(move || {
                         let mut seq = 0;
-                        while let Some(iter) = rx.drain() {
-                            for e in iter {
-                                if e.a != e.i - 5
-                                    || e.b != e.i + 7
-                                    || e.s != format!("Blackbriar {}", e.i)
-                                {
-                                    s_error.send(1).expect("Should send.");
-                                } else {
-                                    let sequence_seen_by_pid = seq * consumers + pid;
-                                    s_seq.send(sequence_seen_by_pid).expect("Should send.");
+                        loop {
+                            match rx.drain() {
+                                Err(TryRecvError::Disconnected) => break,
+                                Err(TryRecvError::Empty) => continue,
+                                Ok(iter) => {
+                                    for e in iter {
+                                        if e.a != e.i - 5
+                                            || e.b != e.i + 7
+                                            || e.s != format!("Blackbriar {}", e.i)
+                                        {
+                                            s_error.send(1).expect("Should send.");
+                                        } else {
+                                            let sequence_seen_by_pid = seq * consumers + pid;
+                                            s_seq.send(sequence_seen_by_pid).expect("Should send.");
+                                        }
+        
+                                        seq += 1;
+                                    }
                                 }
-
-                                seq += 1;
                             }
                         }
                     });

@@ -9,7 +9,7 @@ use std::{
 use crossbeam_utils::CachePadded;
 
 use crate::{
-    barrier::{Barrier, NONE},
+    barrier::Barrier,
     cursor::Cursor,
     ringbuffer::RingBuffer,
     Sequence,
@@ -42,10 +42,17 @@ pub struct Drain<'a, E> {
 }
 
 impl<'a, E> Drain<'a, E> {
-    pub(crate) fn new_empty(ring_buffer: &'a RingBuffer<E>, consumer_cursor: &'a Cursor) -> Self {
+    pub(crate) fn new(
+        sequence: Sequence,
+        available: Sequence,
+        ring_buffer: &'a RingBuffer<E>,
+        consumer_cursor: &'a Cursor,
+    ) -> Self {
+        debug_assert!(available >= sequence, "creating empty Drain is not allowed");
+
         Self {
-            sequence: 0,
-            available: NONE,
+            sequence,
+            available,
             ring_buffer,
             consumer_cursor,
         }
@@ -78,16 +85,13 @@ where
     E: 'a,
 {
     fn drop(&mut self) {
-        // no changes required for empty iterator
-        if self.available != NONE {
-            // Signal to producers or later consumers that we're done processing elements up to `self.available`
-            self.consumer_cursor.store(self.available);
-        }
+        // Signal to producers or later consumers that we're done processing elements up to `self.available`
+        self.consumer_cursor.store(self.available);
     }
 }
 
 pub struct Guard<'a, E> {
-    consumer_cursor: Arc<Cursor>,
+    consumer_cursor: &'a Cursor,
     sequence: i64,
     event: &'a E,
 }
@@ -128,14 +132,15 @@ where
         }
     }
 
+    /// returns single element or disconnect/empty error
     pub fn try_recv(&mut self) -> Result<Guard<'_, E>, TryRecvError> {
         if let Some(available) = self.available {
             let end_of_batch = available == self.sequence;
-            let event = self.get_next();
-
             if end_of_batch {
                 self.available = None;
             }
+
+            let event = self.get_next();
 
             return Ok(event);
         }
@@ -153,16 +158,16 @@ where
         }
 
         let end_of_batch = available == self.sequence;
-        let event = self.get_next();
-
         if !end_of_batch {
             self.available = Some(available);
         }
 
+        let event = self.get_next();
+
         Ok(event)
     }
 
-    fn get_next<'a>(&mut self) -> Guard<'a, E> {
+    fn get_next(&mut self) -> Guard<'_, E> {
         // SAFETY: Now, we have (shared) read access to the event at `sequence`.
         let event_ptr = self.ring_buffer.get(self.sequence);
         let event = unsafe { &*event_ptr };
@@ -172,20 +177,21 @@ where
         self.sequence += 1;
 
         Guard {
-            consumer_cursor: self.consumer_cursor.clone(),
+            consumer_cursor: &self.consumer_cursor,
             sequence,
             event,
         }
     }
 
-    /// Returns `None` when channel is disconnected
+    /// Returns error when empty or disconnected
     ///
     /// `Drain` iterator returns all unread and available elements at moment of call
     ///
     /// All elements of iterator are considered unread until `Drain` is dropped
     /// which can affect producers and dependent consumers
-    pub fn drain(&mut self) -> Option<Drain<'_, E>> {
+    pub fn drain(&mut self) -> Result<Drain<'_, E>, TryRecvError> {
         let available = if let Some(available) = self.available.take() {
+            
             available
         } else {
             let available = self.barrier.get_after(self.sequence);
@@ -193,11 +199,11 @@ where
             fence(Ordering::Acquire);
 
             if closed {
-                return None;
+                return Err(TryRecvError::Disconnected);
             }
 
             if available < self.sequence {
-                return Some(Drain::new_empty(&self.ring_buffer, &self.consumer_cursor));
+                return Err(TryRecvError::Empty)
             }
 
             available
@@ -207,12 +213,12 @@ where
         let sequence = self.sequence;
         self.sequence = available + 1; // ready to read next message after drain
 
-        Some(Drain {
-            available,
+        Ok(Drain::new(
             sequence,
-            ring_buffer: &self.ring_buffer,
+            available,
+            &self.ring_buffer,
             // if we update `consumer_cursor` beforehand then `ring_buffer` could be overwritten in time of iterating
-            consumer_cursor: &self.consumer_cursor,
-        })
+            &self.consumer_cursor,
+        ))
     }
 }
