@@ -2,3 +2,4 @@
 /Cargo.lock
 .idea/
 publishing_notes.txt
+.DS_Store

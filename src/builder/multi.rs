@@ -9,6 +9,7 @@ use crate::{
     builder::ProcessorSettings,
     consumer::{MultiConsumerBarrier, SingleConsumerBarrier},
     producer::multi::{MultiProducer, MultiProducerBarrier},
+    receiver::Receiver,
     wait_strategies::WaitStrategy,
     Sequence,
 };
@@ -116,6 +117,12 @@ where
         MPSCBuilder { parent: self }
     }
 
+    /// Add an event handler with receiver.
+    pub fn handle_events_with_receiver(mut self) -> (MPSCBuilder<E, W, B>, Receiver<E, B>) {
+        let receiver = self.add_event_receiver();
+        (MPSCBuilder { parent: self }, receiver)
+    }
+
     /// Add an event handler with state.
     pub fn handle_events_and_state_with<EH, S, IS>(
         mut self,
@@ -146,6 +153,17 @@ where
         MPMCBuilder {
             parent: self.parent,
         }
+    }
+
+    /// Add an event handler with receiver.
+    pub fn handle_events_with_receiver(mut self) -> (MPMCBuilder<E, W, B>, Receiver<E, B>) {
+        let receiver = self.add_event_receiver();
+        (
+            MPMCBuilder {
+                parent: self.parent,
+            },
+            receiver,
+        )
     }
 
     /// Add an event handler with state.
@@ -206,6 +224,12 @@ where
     {
         self.add_event_handler(event_handler);
         self
+    }
+
+    /// Add an event handler with receiver.
+    pub fn handle_events_with_receiver(mut self) -> (MPMCBuilder<E, W, B>, Receiver<E, B>) {
+        let receiver = self.add_event_receiver();
+        (self, receiver)
     }
 
     /// Add an event handler with state.

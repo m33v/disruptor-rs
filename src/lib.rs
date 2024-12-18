@@ -222,6 +222,7 @@ pub mod builder;
 mod consumer;
 mod cursor;
 mod producer;
+mod receiver;
 mod ringbuffer;
 pub mod wait_strategies;
 
@@ -229,6 +230,7 @@ pub use crate::builder::{build_multi_producer, build_single_producer, ProcessorS
 pub use crate::consumer::{MultiConsumerBarrier, SingleConsumerBarrier};
 pub use crate::producer::{multi::MultiProducer, single::SingleProducer};
 pub use crate::producer::{MissingFreeSlots, Producer, RingBufferFull};
+pub use crate::receiver::{Receiver, TryRecvError};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 
 #[cfg(test)]
@@ -632,6 +634,222 @@ mod tests {
     }
 
     #[test]
+    fn multi_publisher_disruptor_with_receiver() {
+        let (test_sender, r) = mpsc::channel();
+
+        let producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint);
+        let (producer1, mut receiver) = producer1.handle_events_with_receiver();
+        let mut producer1 = producer1.build();
+
+        let mut producer2 = producer1.clone();
+
+        let num_items = 100;
+
+        thread::scope(|s| {
+            s.spawn(move || {
+                for i in 0..num_items / 2 {
+                    producer1.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || {
+                for i in (num_items / 2)..num_items {
+                    producer2.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || loop {
+                match receiver.try_recv() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(e) => {
+                        test_sender.send(e.num).expect("Should be able to send.");
+                    }
+                }
+            });
+        });
+
+        let mut result: Vec<_> = r.iter().collect();
+        result.sort();
+
+        let expected: Vec<i64> = (0..num_items).collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn multi_publisher_disruptor_with_three_receivers() {
+        let (test_sender_1, r1) = mpsc::channel();
+        let (test_sender_2, r2) = mpsc::channel();
+        let (test_sender_3, r3) = mpsc::channel();
+
+        let producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint);
+
+        let (producer1, mut receiver1) = producer1.handle_events_with_receiver();
+        let (producer1, mut receiver2) = producer1.handle_events_with_receiver();
+        let (producer1, mut receiver3) = producer1.handle_events_with_receiver();
+
+        let mut producer1 = producer1.build();
+        let mut producer2 = producer1.clone();
+
+        let num_items = 250000;
+
+        thread::scope(|s| {
+            s.spawn(move || {
+                for i in 0..num_items / 2 {
+                    producer1.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || {
+                for i in (num_items / 2)..num_items {
+                    producer2.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || loop {
+                match receiver1.try_recv() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(e) => {
+                        test_sender_1.send(e.num).expect("Should be able to send.");
+                    }
+                }
+            });
+
+            s.spawn(move || loop {
+                match receiver2.try_recv() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(e) => {
+                        test_sender_2.send(e.num).expect("Should be able to send.");
+                    }
+                }
+            });
+
+            s.spawn(move || loop {
+                match receiver3.try_recv() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(e) => {
+                        test_sender_3.send(e.num).expect("Should be able to send.");
+                    }
+                }
+            });
+        });
+
+        for r in [r1, r2, r3] {
+            let mut result: Vec<_> = r.iter().collect();
+            result.sort();
+
+            let expected: Vec<i64> = (0..num_items).collect();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn multi_publisher_disruptor_receiver_drain() {
+        let (test_sender, r) = mpsc::channel();
+
+        let producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint);
+        let (producer1, mut receiver) = producer1.handle_events_with_receiver();
+        let mut producer1 = producer1.build();
+
+        let mut producer2 = producer1.clone();
+
+        let num_items = 250000;
+
+        thread::scope(|s| {
+            s.spawn(move || {
+                for i in 0..num_items / 2 {
+                    producer1.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || {
+                for i in (num_items / 2)..num_items {
+                    producer2.publish(|e| e.num = i);
+                }
+            });
+
+            s.spawn(move || loop {
+                match receiver.drain() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(iter) => {
+                        for e in iter {
+                            test_sender.send(e.num).expect("Should be able to send.");
+                        }
+                    }
+                }
+            });
+        });
+
+        let mut result: Vec<_> = r.iter().collect();
+        result.sort();
+
+        let expected: Vec<i64> = (0..num_items).collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn drain_should_take_all_events_at_moment_of_call() {
+        let b = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint);
+        let (b, mut rx) = b.handle_events_with_receiver();
+        let mut tx = b.build();
+
+        tx.publish(|e| *e = Event { num: 1 });
+        tx.publish(|e| *e = Event { num: 2 });
+        tx.publish(|e| *e = Event { num: 3 });
+
+        let mut iter = rx.drain().unwrap();
+        assert_eq!(iter.next().map(|e| e.num), Some(1));
+        assert_eq!(iter.next().map(|e| e.num), Some(2));
+
+        tx.publish(|e| *e = Event { num: 4 });
+        drop(iter);
+
+        assert_eq!(rx.drain().unwrap().next().map(|e| e.num), Some(4));
+    }
+
+    #[test]
+    fn early_drop_of_drain_should_fully_cleanup_queue() {
+        let queue_size = 64;
+        let b = build_multi_producer(queue_size, factory(), BusySpinWithSpinLoopHint);
+        let (b, mut rx) = b.handle_events_with_receiver();
+        let mut tx = b.build();
+
+        tx.publish(|e| *e = Event { num: 1 });
+        tx.publish(|e| *e = Event { num: 2 });
+        tx.publish(|e| *e = Event { num: 3 });
+        let iter = rx.drain();
+        drop(iter);
+
+        assert!(tx.try_batch_publish(queue_size, |_| {}).is_ok());
+    }
+
+    #[test]
+    fn drain_returns_correct_error_on_empty() {
+        let queue_size = 64;
+        let b = build_multi_producer(queue_size, factory(), BusySpinWithSpinLoopHint);
+        let (b, mut rx) = b.handle_events_with_receiver();
+        let _tx = b.build();
+
+        assert!(matches!(rx.drain(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn drain_returns_correct_error_on_disconnect() {
+        let queue_size = 64;
+        let b = build_multi_producer(queue_size, factory(), BusySpinWithSpinLoopHint);
+        let (b, mut rx) = b.handle_events_with_receiver();
+        let tx = b.build();
+
+        drop(tx);
+
+        assert!(matches!(rx.drain(), Err(TryRecvError::Disconnected)));
+    }
+
+    #[test]
     fn multi_publisher_disruptor_with_batch_publication() {
         let (s, r) = mpsc::channel();
         let processor = move |e: &Event, _, _| {
@@ -919,6 +1137,204 @@ mod tests {
                 });
             }
             drop(producer); // Drop excess producer not used.
+        });
+
+        let expected_sequence_reads = consumers * num_events * producers;
+        let errors: Vec<_> = r_error.iter().collect();
+        let mut seen_sequences: Vec<_> = r_seq.iter().collect();
+
+        assert!(errors.is_empty());
+        assert_eq!(expected_sequence_reads as usize, seen_sequences.len());
+        // Assert that each consumer saw each sequence number.
+        seen_sequences.sort();
+        for seq_seen_by_pid in 0..expected_sequence_reads {
+            assert_eq!(seq_seen_by_pid, seen_sequences[seq_seen_by_pid as usize]);
+        }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn stress_test_try_recv() {
+        #[derive(Debug)]
+        struct StressEvent {
+            i: Sequence,
+            a: i64,
+            b: i64,
+            s: String,
+        }
+
+        let (s_seq, r_seq) = mpsc::channel();
+        let (s_error, r_error) = mpsc::channel();
+        let num_events = 250_000;
+        let producers = 4;
+        let consumers = 3;
+
+        let factory = || StressEvent {
+            i: -1,
+            a: -1,
+            b: -1,
+            s: "".to_string(),
+        };
+
+        let producer = build_multi_producer(1 << 16, factory, BusySpin);
+        let (producer, tx1) = producer.handle_events_with_receiver();
+        let (producer, tx2) = producer.handle_events_with_receiver();
+        let (producer, tx3) = producer.handle_events_with_receiver();
+        let producer = producer.build();
+
+        thread::scope(move |s| {
+            for _ in 0..producers {
+                let mut producer = producer.clone();
+                s.spawn(move || {
+                    for i in 0..num_events {
+                        producer.publish(|e| {
+                            e.i = i;
+                            e.a = i - 5;
+                            e.b = i + 7;
+                            e.s = format!("Blackbriar {}", i).to_string();
+                        });
+                    }
+                });
+            }
+            drop(producer); // Drop excess producer not used.
+
+            for (pid, mut rx) in [tx1, tx2, tx3].into_iter().enumerate() {
+                let pid = pid as i64;
+
+                let s_error = s_error.clone();
+                let s_seq = s_seq.clone();
+
+                s.spawn(move || {
+                    let s_error = s_error.clone();
+                    let s_seq = s_seq.clone();
+                    std::thread::spawn(move || {
+                        let mut seq = 0;
+                        loop {
+                            match rx.try_recv() {
+                                Err(TryRecvError::Disconnected) => break,
+                                Err(TryRecvError::Empty) => continue,
+                                Ok(e) => {
+                                    if e.a != e.i - 5
+                                        || e.b != e.i + 7
+                                        || e.s != format!("Blackbriar {}", e.i)
+                                    {
+                                        s_error.send(1).expect("Should send.");
+                                    } else {
+                                        let sequence_seen_by_pid = seq * consumers + pid;
+                                        s_seq.send(sequence_seen_by_pid).expect("Should send.");
+                                    }
+
+                                    seq += 1;
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+
+            // Drop unused Senders.
+            drop(s_seq);
+            drop(s_error);
+        });
+
+        let expected_sequence_reads = consumers * num_events * producers;
+        let errors: Vec<_> = r_error.iter().collect();
+        let mut seen_sequences: Vec<_> = r_seq.iter().collect();
+
+        assert!(errors.is_empty());
+        assert_eq!(expected_sequence_reads as usize, seen_sequences.len());
+        // Assert that each consumer saw each sequence number.
+        seen_sequences.sort();
+        for seq_seen_by_pid in 0..expected_sequence_reads {
+            assert_eq!(seq_seen_by_pid, seen_sequences[seq_seen_by_pid as usize]);
+        }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn stress_test_drain() {
+        #[derive(Debug)]
+        struct StressEvent {
+            i: Sequence,
+            a: i64,
+            b: i64,
+            s: String,
+        }
+
+        let (s_seq, r_seq) = mpsc::channel();
+        let (s_error, r_error) = mpsc::channel();
+        let num_events = 250_000;
+        let producers = 4;
+        let consumers = 3;
+
+        let factory = || StressEvent {
+            i: -1,
+            a: -1,
+            b: -1,
+            s: "".to_string(),
+        };
+
+        let producer = build_multi_producer(1 << 16, factory, BusySpin);
+        let (producer, tx1) = producer.handle_events_with_receiver();
+        let (producer, tx2) = producer.handle_events_with_receiver();
+        let (producer, tx3) = producer.handle_events_with_receiver();
+        let producer = producer.build();
+
+        thread::scope(move |s| {
+            for _ in 0..producers {
+                let mut producer = producer.clone();
+                s.spawn(move || {
+                    for i in 0..num_events {
+                        producer.publish(|e| {
+                            e.i = i;
+                            e.a = i - 5;
+                            e.b = i + 7;
+                            e.s = format!("Blackbriar {}", i).to_string();
+                        });
+                    }
+                });
+            }
+            drop(producer); // Drop excess producer not used.
+
+            for (pid, mut rx) in [tx1, tx2, tx3].into_iter().enumerate() {
+                let pid = pid as i64;
+
+                let s_error = s_error.clone();
+                let s_seq = s_seq.clone();
+
+                s.spawn(move || {
+                    let s_error = s_error.clone();
+                    let s_seq = s_seq.clone();
+                    std::thread::spawn(move || {
+                        let mut seq = 0;
+                        loop {
+                            match rx.drain() {
+                                Err(TryRecvError::Disconnected) => break,
+                                Err(TryRecvError::Empty) => continue,
+                                Ok(iter) => {
+                                    for e in iter {
+                                        if e.a != e.i - 5
+                                            || e.b != e.i + 7
+                                            || e.s != format!("Blackbriar {}", e.i)
+                                        {
+                                            s_error.send(1).expect("Should send.");
+                                        } else {
+                                            let sequence_seen_by_pid = seq * consumers + pid;
+                                            s_seq.send(sequence_seen_by_pid).expect("Should send.");
+                                        }
+
+                                        seq += 1;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+
+            // Drop unused Senders.
+            drop(s_seq);
+            drop(s_error);
         });
 
         let expected_sequence_reads = consumers * num_events * producers;
