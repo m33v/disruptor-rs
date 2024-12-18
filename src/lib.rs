@@ -771,15 +771,13 @@ mod tests {
                 }
             });
 
-            s.spawn(move || {
-                loop {
-                    match receiver.drain() {
-                        Err(TryRecvError::Disconnected) => break,
-                        Err(TryRecvError::Empty) => continue,
-                        Ok(iter) => {
-                            for e in iter {
-                                test_sender.send(e.num).expect("Should be able to send.");
-                            }
+            s.spawn(move || loop {
+                match receiver.drain() {
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => continue,
+                    Ok(iter) => {
+                        for e in iter {
+                            test_sender.send(e.num).expect("Should be able to send.");
                         }
                     }
                 }
@@ -1324,7 +1322,7 @@ mod tests {
                                             let sequence_seen_by_pid = seq * consumers + pid;
                                             s_seq.send(sequence_seen_by_pid).expect("Should send.");
                                         }
-        
+
                                         seq += 1;
                                     }
                                 }

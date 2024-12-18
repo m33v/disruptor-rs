@@ -8,12 +8,7 @@ use std::{
 
 use crossbeam_utils::CachePadded;
 
-use crate::{
-    barrier::Barrier,
-    cursor::Cursor,
-    ringbuffer::RingBuffer,
-    Sequence,
-};
+use crate::{barrier::Barrier, cursor::Cursor, ringbuffer::RingBuffer, Sequence};
 
 /// An error returned from the [`try_recv`] method.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -191,7 +186,6 @@ where
     /// which can affect producers and dependent consumers
     pub fn drain(&mut self) -> Result<Drain<'_, E>, TryRecvError> {
         let available = if let Some(available) = self.available.take() {
-            
             available
         } else {
             let available = self.barrier.get_after(self.sequence);
@@ -203,7 +197,7 @@ where
             }
 
             if available < self.sequence {
-                return Err(TryRecvError::Empty)
+                return Err(TryRecvError::Empty);
             }
 
             available
