@@ -228,6 +228,7 @@ pub mod wait_strategies;
 
 pub use crate::builder::{build_multi_producer, build_single_producer, ProcessorSettings};
 pub use crate::consumer::{MultiConsumerBarrier, SingleConsumerBarrier};
+pub use crate::producer::multi::MultiProducerBarrier;
 pub use crate::producer::{multi::MultiProducer, single::SingleProducer};
 pub use crate::producer::{MissingFreeSlots, Producer, RingBufferFull};
 pub use crate::receiver::{Receiver, TryRecvError};
@@ -674,6 +675,23 @@ mod tests {
 
         let expected: Vec<i64> = (0..num_items).collect();
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn dropped_receiver_should_not_block_others() {
+        let queue_size: usize = 64;
+
+        let b = build_multi_producer(queue_size, factory(), BusySpinWithSpinLoopHint);
+        let (b, mut rx) = b.handle_events_with_receiver();
+        let (b, dropped_receiver) = b.handle_events_with_receiver();
+
+        let mut tx = b.build();
+        
+        drop(dropped_receiver);
+
+        tx.batch_publish(queue_size, |_| {}); // full queue
+        assert!(rx.try_recv().is_ok()); // full minus one element
+        assert!(tx.try_publish(|_| {}).is_ok()); // should be able send one new element if `dropped_receiver` do not block it
     }
 
     #[test]
