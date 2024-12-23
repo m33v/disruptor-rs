@@ -21,6 +21,9 @@ pub enum TryRecvError {
 }
 
 /// receive events using `drain` and `try_recv` methods
+/// 
+/// WARN! At this moment `Receiver` should not be dropped else it will block other receivers
+/// See `dropped_receiver_should_not_block_others` test
 pub struct Receiver<E, B> {
     sequence: Sequence,
     available: Option<Sequence>,
