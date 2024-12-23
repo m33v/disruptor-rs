@@ -20,6 +20,7 @@ pub enum TryRecvError {
     Disconnected,
 }
 
+/// receive events using `drain` and `try_recv` methods
 pub struct Receiver<E, B> {
     sequence: Sequence,
     available: Option<Sequence>,
